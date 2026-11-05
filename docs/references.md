@@ -23,8 +23,8 @@ designs below were reimplemented in Mettle.
   widths; tools/gen_width.py makes src/width_tables.mettle. UTF-8 decoding
   follows Unicode chapter 3 (no overlongs, no surrogates) and replaces bad
   bytes with U+FFFD one maximal subpart at a time.
-- **Linux**: termios (raw mode with the same flags as cfmakeraw),
-  TIOCGWINSZ, signalfd(2), rt_sigprocmask(2) and ppoll(2).
+- **Linux**: termios raw mode (cfmakeraw flags), TIOCGWINSZ and
+  signalfd(2), through std/term; ppoll(2) through std/linux.
 
 ## Libraries studied
 
@@ -42,8 +42,9 @@ designs below were reimplemented in Mettle.
 
 ## Choices
 
-- **signalfd, not signal handlers.** SIGWINCH, SIGINT, SIGTERM and SIGHUP
-  are blocked and read from a signalfd in the same ppoll as input, so
+- **A signal descriptor, not signal handlers.** SIGWINCH, SIGINT, SIGTERM
+  and SIGHUP are blocked and read from std/term's signal descriptor in the
+  same ppoll as input, so
   there are no async-signal-safety problems and resizes come in order with
   keys.
 - **Ctrl-C as an event.** Raw mode turns off ISIG, so Ctrl-C is a byte;
@@ -57,11 +58,10 @@ designs below were reimplemented in Mettle.
 - **Grapheme handling** is the common terminal subset: marks join, ZWJ
   joins, flags pair. Full UAX #29 segmentation is not done; terminals do
   not agree on it either.
-- **System calls.** read, write, close, openat, ppoll and exit_group go
-  through std/linux. The ioctls, rt_sigprocmask and signalfd4 have no
-  std wrapper yet, so src/term_linux.mettle calls them by their
-  LINUX_SYS_ numbers (which std/linux_sys gives for x86-64 and AArch64);
-  they are asked for in std/term so they can move there.
+- **std first.** Raw mode, the window size and the signal descriptor come
+  from std/term (term_raw_begin/end, term_size, term_signal_fd/next/end);
+  opening /dev/tty, read, write, ppoll and exit go through std/linux.
+  tui has no system call numbers of its own.
 - **Nothing to write, nothing written.** A frame with no changed cells
   and the same cursor makes no write() at all, so a once-a-second redraw
   of a still screen costs only the cell comparison.

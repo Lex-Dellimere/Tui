@@ -5,7 +5,7 @@
 import "mbuild/api";
 
 fn project() {
-  mb_package("tui", "0.1.1");
+  mb_package("tui", "0.1.2");
   mb_meta("description", "terminal user interfaces in pure Mettle: raw mode, diff rendering, input, layout, widgets, charts");
   mb_meta("license", "Apache-2.0");
   mb_meta("repository", "https://github.com/Lex-Dellimere/Tui");

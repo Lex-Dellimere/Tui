@@ -11,7 +11,7 @@ import "buf";
 import "color";
 import "render";
 import "input";
-import "term_linux.mettle" if linux;
+import "term";
 
 // Options for tui_init_with.
 export const TUI_OPT_MOUSE = 1;        // clicks, wheel and drags (xterm 1000, 1002, 1006)
@@ -419,11 +419,9 @@ export fn tui_poll(t: Tui*, timeout_ms: int64, ev: TuiEvent*) -> bool {
     if (got_sig) {
       var quit: bool = false;
       var resized: bool = false;
+      // One signal per wakeup: the read blocks, and ppoll reports the rest.
       var sig: int32 = tui_term_next_signal(&t->term);
-      while (sig != 0) {
-        if (sig == TUI_SIGWINCH) { resized = true; } else { quit = true; }
-        sig = tui_term_next_signal(&t->term);
-      }
+      if (sig == TERM_SIGWINCH) { resized = true; } else if (sig != 0) { quit = true; }
       if (quit) {
         ev->kind = TUI_EV_QUIT;
         return true;

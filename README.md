@@ -4,7 +4,8 @@ Terminal user interfaces for Mettle, in pure Mettle. No C, no ncurses.
 
 - Full-screen sessions: raw mode, the alternate screen, a hidden cursor,
   and the terminal put back as it was on exit, Ctrl-C, SIGTERM and SIGHUP.
-- Resizing (SIGWINCH) and signals arrive as events through a signalfd, in
+- Resizing (SIGWINCH) and signals arrive as events through a signal
+  descriptor from std/term, in
   the same wait as the keyboard, with no signal handlers.
 - A double-buffered cell grid: each frame only writes the cells that
   changed, inside synchronized-output brackets, so screens do not flicker.
@@ -23,7 +24,8 @@ Terminal user interfaces for Mettle, in pure Mettle. No C, no ncurses.
 - A headless backend for tests: render to memory, feed keys, check exact
   screens and exact output bytes, with a clock that only moves when asked.
 
-Linux only for now (it uses Linux system calls directly).
+Linux only for now: the terminal parts come from std/term, which also
+runs on macOS, but the input wait still uses Linux ppoll.
 
 ## Example
 
