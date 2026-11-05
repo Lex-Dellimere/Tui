@@ -57,6 +57,14 @@ designs below were reimplemented in Mettle.
 - **Grapheme handling** is the common terminal subset: marks join, ZWJ
   joins, flags pair. Full UAX #29 segmentation is not done; terminals do
   not agree on it either.
+- **System calls.** read, write, close, openat, ppoll and exit_group go
+  through std/linux. The ioctls, rt_sigprocmask and signalfd4 have no
+  std wrapper yet, so src/term_linux.mettle calls them by their
+  LINUX_SYS_ numbers (which std/linux_sys gives for x86-64 and AArch64);
+  they are asked for in std/term so they can move there.
+- **Nothing to write, nothing written.** A frame with no changed cells
+  and the same cursor makes no write() at all, so a once-a-second redraw
+  of a still screen costs only the cell comparison.
 - **Headless clock.** Tests never sleep: time moves to the next timer.
 
 ## Testing

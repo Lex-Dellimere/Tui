@@ -5,6 +5,7 @@
 
 import "std/mem";
 import "std/time";
+import "std/linux";
 import "types";
 import "buf";
 import "color";
@@ -55,6 +56,9 @@ export struct Tui {
   cursor_y: int32;
   last_cells: int32;     // cells written by the last tui_show
   last_bytes: int64;     // bytes written by the last tui_show
+  shown_cursor: bool;    // cursor state the terminal has now
+  shown_x: int32;
+  shown_y: int32;
 }
 
 fn tui_new_common(w: int32, h: int32) -> Tui* {
@@ -177,7 +181,7 @@ export fn tui_end(t: Tui*) {
 // Leaves the terminal as it was and ends the process with code.
 export fn tui_exit(t: Tui*, code: int32) {
   tui_end(t);
-  syscall(LINUX_SYS_EXIT_GROUP, (int64)code);
+  linux_exit_group((int64)code);
 }
 
 export fn tui_size(t: Tui*) -> TuiRect {
@@ -224,6 +228,7 @@ export fn tui_show(t: Tui*) {
   var o: TuiOut* = t->out;
   if (t->headless) { tui_out_reset(o); }
   var start: int64 = o->len;
+  var full: bool = t->redraw;
   if (t->sync) { tui_dec(o, 2026, true); }
   if (t->redraw) {
     tui_csi(o); tui_out_byte(o, 109);              // SGR 0
@@ -234,6 +239,17 @@ export fn tui_show(t: Tui*) {
     t->redraw = false;
   }
   t->last_cells = tui_render_diff(o, &t->pen, t->front, t->back);
+  var same_cursor: bool = t->cursor_on == t->shown_cursor;
+  if (t->cursor_on && (t->cursor_x != t->shown_x || t->cursor_y != t->shown_y)) { same_cursor = false; }
+  if (!full && t->last_cells == 0 && same_cursor) {
+    // Nothing changed: write nothing at all.
+    o->len = start;
+    t->last_bytes = 0;
+    return;
+  }
+  t->shown_cursor = t->cursor_on;
+  t->shown_x = t->cursor_x;
+  t->shown_y = t->cursor_y;
   if (t->cursor_on) {
     tui_move(o, &t->pen, t->cursor_x, t->cursor_y);
     tui_dec(o, 25, true);

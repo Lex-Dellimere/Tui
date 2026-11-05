@@ -109,6 +109,11 @@ export fn tui_buf_set_cp(b: TuiBuf*, x: int32, y: int32, cp: int32, st: TuiStyle
   tui_buf_set(b, x, y, &tmp[0], n, w, st);
 }
 
+// Puts one code point; the same as tui_buf_set_cp with a uint32.
+export fn tui_put_cp(b: TuiBuf*, x: int32, y: int32, cp: uint32, st: TuiStyle) {
+  tui_buf_set_cp(b, x, y, (int32)cp, st);
+}
+
 // Changes only the style of a cell, keeping its text.
 export fn tui_buf_set_style(b: TuiBuf*, x: int32, y: int32, st: TuiStyle) {
   var c: TuiCell* = tui_buf_cell(b, x, y);

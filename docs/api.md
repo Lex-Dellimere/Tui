@@ -29,7 +29,7 @@ call `tui_end`. A crash or SIGKILL cannot be caught; run `reset` then.
 | Function | What it does |
 |---|---|
 | `tui_frame(t) -> TuiBuf*` | The buffer for the next frame, cleared. Draw everything into it. |
-| `tui_show(t)` | Write the frame: only cells that changed since the last frame, inside synchronized-output brackets (mode 2026). |
+| `tui_show(t)` | Write the frame in one write: only cells that changed since the last frame, inside synchronized-output brackets (mode 2026). A frame with no changes writes nothing. |
 | `t->last_cells`, `t->last_bytes` | Cells and bytes the last `tui_show` wrote. |
 
 ## Events
@@ -121,7 +121,8 @@ blanks the other half.
 `TuiBuf { w, h, cells }`, `TuiCell { text, len, width, style }`.
 `tui_buf_new(w, h)`, `tui_buf_free`, `tui_buf_clear`, `tui_buf_resize`,
 `tui_buf_area(b) -> TuiRect`, `tui_buf_cell(b, x, y) -> TuiCell*` (0 off the
-buffer), `tui_buf_set_cp(b, x, y, cp, st)`, `tui_buf_set_style`,
+buffer), `tui_buf_set_cp(b, x, y, cp: int32, st)` and `tui_put_cp(b, x, y,
+cp: uint32, st)` (one code point, e.g. your own braille), `tui_buf_set_style`,
 `tui_buf_blit(dst, src, x, y)`, `tui_buf_text(b)`, `tui_buf_row(b, y)`.
 
 ## Layout

@@ -35,6 +35,9 @@ fn test_buf() {
   tui_put(b, -3, 0, "abcdef", st);
   tui_put(b, 0, 9, "abc", st);
   t_str("negative x", tui_buf_row(b, 0), "def   ");
+  tui_buf_clear(b);
+  tui_put_cp(b, 1, 1, (uint32)0x2800 + (uint32)0x47, st);
+  t_str("put_cp", tui_buf_row(b, 1), " ⡇    ");
   tui_buf_free(b);
 }
 
@@ -51,7 +54,8 @@ fn test_render() {
   tui_put(b, 0, 0, "hi", tui_style_default());
   tui_show(t);
   t_eq("same frame cells", t->last_cells, 0);
-  t_str("same frame bytes", t_show(tui_output(t)), "`[?2026h`[?25l`[?2026l");
+  t_eq("same frame bytes", t->last_bytes, 0);
+  t_str("same frame output", tui_output(t), "");
 
   // One cell changes colour; the next cell along uses CUF, not CUP.
   b = tui_frame(t);
