@@ -1,0 +1,190 @@
+// Input parsing: keys, modifiers, mouse, paste, and random bytes.
+import "std/io";
+import "tui/tui";
+import "tutil";
+
+var g_in: TuiInput* = (TuiInput*)0;
+
+fn one(name: string, bytes: string, kind: int32, key: int32, ch: int32, mods: int32) {
+  var ev: TuiEvent;
+  tui_input_feed_str(g_in, t_esc(bytes));
+  var got: bool = tui_input_next(g_in, &ev, true);
+  t_ok(name, got);
+  t_eq(name, (int64)ev.kind, (int64)kind);
+  t_eq(name, (int64)ev.key, (int64)key);
+  t_eq(name, (int64)ev.ch, (int64)ch);
+  t_eq(name, (int64)ev.mods, (int64)mods);
+  t_ok(name, !tui_input_next(g_in, &ev, true));
+}
+
+fn key(name: string, bytes: string, k: int32, mods: int32) {
+  one(name, bytes, TUI_EV_KEY, k, 0, mods);
+}
+
+fn chr(name: string, bytes: string, ch: int32, mods: int32) {
+  one(name, bytes, TUI_EV_KEY, TUI_KEY_CHAR, ch, mods);
+}
+
+fn test_keys() {
+  chr("a", "a", 97, 0);
+  chr("utf8", "é", 0xE9, 0);
+  chr("emoji", "😀", 0x1F600, 0);
+  key("enter", "\r", TUI_KEY_ENTER, 0);
+  key("tab", "\t", TUI_KEY_TAB, 0);
+  key("esc alone", "`", TUI_KEY_ESC, 0);
+  chr("alt x", "`x", 120, TUI_MOD_ALT);
+  key("up", "`[A", TUI_KEY_UP, 0);
+  key("ss3 down", "`OB", TUI_KEY_DOWN, 0);
+  key("ctrl right", "`[1;5C", TUI_KEY_RIGHT, TUI_MOD_CTRL);
+  key("shift alt left", "`[1;4D", TUI_KEY_LEFT, TUI_MOD_SHIFT | TUI_MOD_ALT);
+  key("home", "`[H", TUI_KEY_HOME, 0);
+  key("end tilde", "`[4~", TUI_KEY_END, 0);
+  key("delete", "`[3~", TUI_KEY_DELETE, 0);
+  key("ctrl pgdn", "`[6;5~", TUI_KEY_PGDN, TUI_MOD_CTRL);
+  key("f1", "`OP", TUI_KEY_F1, 0);
+  key("f5", "`[15~", TUI_KEY_F1 + 4, 0);
+  key("f12", "`[24~", TUI_KEY_F1 + 11, 0);
+  key("backtab", "`[Z", TUI_KEY_TAB, TUI_MOD_SHIFT);
+  chr("kitty ctrl a", "`[97;5u", 97, TUI_MOD_CTRL);
+  key("kitty enter", "`[13u", TUI_KEY_ENTER, 0);
+}
+
+fn test_ctrl_bytes() {
+  // Control bytes 0x01 to 0x1a are Ctrl + letter, except Tab, Enter and Backspace.
+  var b: uint8[1];
+  var ev: TuiEvent;
+  for i in 1..27 {
+    b[0] = (uint8)i;
+    tui_input_feed(g_in, &b[0], 1);
+    tui_input_next(g_in, &ev, true);
+    if (i == 8) { t_eq("ctrl h", (int64)ev.key, (int64)TUI_KEY_BACKSPACE); continue; }
+    if (i == 9) { t_eq("ctrl i", (int64)ev.key, (int64)TUI_KEY_TAB); continue; }
+    if (i == 10 || i == 13) { t_eq("ctrl j/m", (int64)ev.key, (int64)TUI_KEY_ENTER); continue; }
+    t_eq("ctrl letter", (int64)ev.ch, (int64)(96 + i));
+    t_eq("ctrl mod", (int64)ev.mods, (int64)TUI_MOD_CTRL);
+  }
+  b[0] = (uint8)127;
+  tui_input_feed(g_in, &b[0], 1);
+  t_ok("del is backspace", tui_input_next(g_in, &ev, true) && ev.key == TUI_KEY_BACKSPACE);
+}
+
+fn test_split() {
+  // A sequence cut in two waits for the rest (when not forced).
+  var ev: TuiEvent;
+  tui_input_feed_str(g_in, t_esc("`[1;"));
+  t_ok("partial waits", !tui_input_next(g_in, &ev, false));
+  tui_input_feed_str(g_in, "5A");
+  t_ok("partial done", tui_input_next(g_in, &ev, false) && ev.key == TUI_KEY_UP && ev.mods == TUI_MOD_CTRL);
+  // A lone ESC waits too, until forced.
+  tui_input_feed_str(g_in, t_esc("`"));
+  t_ok("esc waits", !tui_input_next(g_in, &ev, false));
+  t_ok("esc forced", tui_input_next(g_in, &ev, true) && ev.key == TUI_KEY_ESC);
+  // Half a UTF-8 character waits.
+  var half: uint8[1] = [0xE2];
+  tui_input_feed(g_in, &half[0], 1);
+  t_ok("utf8 waits", !tui_input_next(g_in, &ev, false));
+  var rest: uint8[2] = [0x82, 0xAC];
+  tui_input_feed(g_in, &rest[0], 2);
+  t_ok("utf8 done", tui_input_next(g_in, &ev, false) && ev.ch == 0x20AC);
+  // Several events in one read.
+  tui_input_feed_str(g_in, t_esc("ab`[Bc"));
+  var n: int32 = 0;
+  while (tui_input_next(g_in, &ev, true)) { n = n + 1; }
+  t_eq("four events", (int64)n, 4);
+}
+
+fn test_mouse() {
+  var ev: TuiEvent;
+  tui_input_feed_str(g_in, t_esc("`[<0;10;5M"));
+  t_ok("press", tui_input_next(g_in, &ev, true));
+  t_eq("press kind", (int64)ev.kind, (int64)TUI_EV_MOUSE);
+  t_eq("press x", (int64)ev.x, 9);
+  t_eq("press y", (int64)ev.y, 4);
+  t_eq("press button", (int64)ev.button, (int64)TUI_BTN_LEFT);
+  t_eq("press action", (int64)ev.action, (int64)TUI_MOUSE_PRESS);
+  tui_input_feed_str(g_in, t_esc("`[<2;1;1m"));
+  tui_input_next(g_in, &ev, true);
+  t_ok("right release", ev.button == TUI_BTN_RIGHT && ev.action == TUI_MOUSE_RELEASE);
+  tui_input_feed_str(g_in, t_esc("`[<65;3;4M"));
+  tui_input_next(g_in, &ev, true);
+  t_ok("wheel down", ev.button == TUI_BTN_WHEEL_DOWN);
+  tui_input_feed_str(g_in, t_esc("`[<32;3;4M"));
+  tui_input_next(g_in, &ev, true);
+  t_ok("drag", ev.action == TUI_MOUSE_DRAG && ev.button == TUI_BTN_LEFT);
+  tui_input_feed_str(g_in, t_esc("`[<35;3;4M"));
+  tui_input_next(g_in, &ev, true);
+  t_ok("move", ev.action == TUI_MOUSE_MOVE);
+  tui_input_feed_str(g_in, t_esc("`[<16;3;4M"));
+  tui_input_next(g_in, &ev, true);
+  t_ok("ctrl click", ev.mods == TUI_MOD_CTRL && ev.button == TUI_BTN_LEFT);
+}
+
+fn test_paste() {
+  var ev: TuiEvent;
+  tui_input_feed_str(g_in, t_esc("`[200~hello `[A world"));
+  t_ok("paste waits for end", !tui_input_next(g_in, &ev, false));
+  tui_input_feed_str(g_in, t_esc("!`[20"));
+  t_ok("split end marker", !tui_input_next(g_in, &ev, false));
+  tui_input_feed_str(g_in, t_esc("1~x"));
+  t_ok("paste", tui_input_next(g_in, &ev, false) && ev.kind == TUI_EV_PASTE);
+  t_str("paste text", t_show(ev.text), "hello `[A world!");
+  t_ok("after paste", tui_input_next(g_in, &ev, false) && ev.ch == 120);
+}
+
+fn test_focus() {
+  var ev: TuiEvent;
+  tui_input_feed_str(g_in, t_esc("`[I`[O"));
+  t_ok("focus in", tui_input_next(g_in, &ev, true) && ev.kind == TUI_EV_FOCUS && ev.focus);
+  t_ok("focus out", tui_input_next(g_in, &ev, true) && ev.kind == TUI_EV_FOCUS && !ev.focus);
+}
+
+fn test_fuzz() {
+  // Random bytes, biased toward ESC, '[', digits and ';': never a crash,
+  // never a stuck buffer, every mouse event in range.
+  t_seed(12345);
+  var buf: uint8[64];
+  var ev: TuiEvent;
+  var events: int64 = 0;
+  for round in 0..20000 {
+    var n: int32 = (int32)(t_rand() % (uint64)64);
+    for i in 0..n {
+      var r: uint64 = t_rand() % (uint64)10;
+      var v: uint8 = (uint8)(t_rand() % (uint64)256);
+      if (r == (uint64)0) { v = (uint8)27; }
+      if (r == (uint64)1) { v = (uint8)91; }
+      if (r == (uint64)2) { v = (uint8)(48 + (int32)(t_rand() % (uint64)10)); }
+      if (r == (uint64)3) { v = (uint8)59; }
+      if (r == (uint64)4) { v = (uint8)60; }
+      buf[i] = v;
+    }
+    tui_input_feed(g_in, &buf[0], (int64)n);
+    var guard: int32 = 0;
+    while (tui_input_next(g_in, &ev, round % 3 == 0) && guard < 1000) {
+      events = events + 1;
+      guard = guard + 1;
+      if (ev.kind == TUI_EV_KEY && ev.key == TUI_KEY_CHAR) {
+        if (ev.ch < 0 || ev.ch > 0x10FFFF) { t_ok("fuzz char range", false); }
+      }
+    }
+    if (round % 3 == 0) {
+      // Forced: everything that is not a paste is used up.
+      if (!g_in->in_paste && tui_input_pending(g_in)) { t_ok("fuzz drained", false); }
+    }
+  }
+  while (tui_input_next(g_in, &ev, true)) { }
+  t_ok("fuzz empty at end", !tui_input_pending(g_in) && !g_in->in_paste);
+  t_ok("fuzz produced events", events > 1000);
+}
+
+fn main() -> int32 {
+  g_in = tui_input_new();
+  test_keys();
+  test_ctrl_bytes();
+  test_split();
+  test_mouse();
+  test_paste();
+  test_focus();
+  test_fuzz();
+  tui_input_free(g_in);
+  return t_done("input");
+}

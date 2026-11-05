@@ -1,0 +1,53 @@
+// Shows each event as it arrives: keys with modifiers, mouse, paste,
+// resize and focus. Press q to quit.
+import "std/io";
+import "tui/tui";
+
+fn mods_text(m: int32) -> string {
+  var s: string = "";
+  if ((m & TUI_MOD_CTRL) != 0) { s = s + "Ctrl+"; }
+  if ((m & TUI_MOD_ALT) != 0) { s = s + "Alt+"; }
+  if ((m & TUI_MOD_SHIFT) != 0) { s = s + "Shift+"; }
+  return s;
+}
+
+fn main() -> int32 {
+  var t: Tui* = tui_init_with(TUI_OPT_MOUSE | TUI_OPT_PASTE | TUI_OPT_FOCUS);
+  if (t == 0) { println("tui-keys needs a terminal"); return 1; }
+  tui_set_ctrl_c_quits(t, false);
+  var lines: string[200];
+  var n: int32 = 0;
+  var ev: TuiEvent;
+  var running: bool = true;
+  while (running) {
+    var b: TuiBuf* = tui_frame(t);
+    var inner: TuiRect = tui_block(b, tui_size(t), TUI_BORDER_ROUNDED, tui_style_fg(TUI_CYAN), "events (q quits)", tui_style_default());
+    var first: int32 = n - inner.h;
+    if (first < 0) { first = 0; }
+    for i in first..n { tui_put_clip(b, inner.x, inner.y + i - first, lines[i % 200], inner.w, tui_style_default()); }
+    tui_show(t);
+    if (!tui_poll(t, -1, &ev)) { continue; }
+    var line: string = "";
+    switch (ev.kind) {
+      case TUI_EV_KEY: {
+        if (ev.key == TUI_KEY_CHAR) {
+          line = "key " + mods_text(ev.mods) + "char {ev.ch}";
+          if (ev.ch == 113 && ev.mods == 0) { running = false; }
+        } else {
+          line = "key " + mods_text(ev.mods) + "code {ev.key}";
+        }
+      }
+      case TUI_EV_MOUSE: { line = "mouse " + mods_text(ev.mods) + "button {ev.button} action {ev.action} at {ev.x},{ev.y}"; }
+      case TUI_EV_PASTE: { line = "paste {ev.text.length} bytes"; }
+      case TUI_EV_RESIZE: { line = "resize {ev.w}x{ev.h}"; }
+      case TUI_EV_FOCUS: { line = "focus {ev.focus}"; }
+      case TUI_EV_QUIT: { line = "quit signal"; running = false; }
+      default: { }
+    }
+    if (n >= 200) { free(lines[n % 200].chars); }
+    lines[n % 200] = line;
+    n = n + 1;
+  }
+  tui_end(t);
+  return 0;
+}

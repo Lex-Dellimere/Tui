@@ -1,0 +1,51 @@
+// The headless session: events, timers and quitting.
+import "std/io";
+import "tui/tui";
+import "tutil";
+
+fn main() -> int32 {
+  var t: Tui* = tui_headless(20, 5);
+  var ev: TuiEvent;
+  t_ok("nothing yet", !tui_poll(t, 100, &ev));
+  t_eq("clock moved", tui_now(t), 100);
+
+  // Timers fire in order on the session clock.
+  var fast: int32 = tui_timer_every(t, 250);
+  var once: int32 = tui_timer_once(t, 600);
+  t_ok("timer 1", tui_poll(t, -1, &ev) && ev.kind == TUI_EV_TIMER && ev.timer == fast);
+  t_eq("at 350", tui_now(t), 350);
+  t_ok("timer 2", tui_poll(t, -1, &ev) && ev.timer == fast);
+  t_ok("once", tui_poll(t, -1, &ev) && ev.timer == once);
+  t_eq("at 700", tui_now(t), 700);
+  t_ok("timer 3", tui_poll(t, -1, &ev) && ev.timer == fast);
+  t_eq("at 850", tui_now(t), 850);
+  t_ok("short wait", !tui_poll(t, 50, &ev));
+  tui_timer_stop(t, fast);
+  t_ok("stopped", !tui_poll(t, 1000, &ev));
+
+  // Input comes before timers; a lone ESC is taken as it is.
+  tui_timer_every(t, 10);
+  tui_feed(t, t_esc("q`"));
+  t_ok("key q", tui_poll(t, -1, &ev) && ev.kind == TUI_EV_KEY && ev.ch == 113);
+  t_ok("esc", tui_poll(t, -1, &ev) && ev.key == TUI_KEY_ESC);
+  t_ok("then timer", tui_poll(t, -1, &ev) && ev.kind == TUI_EV_TIMER);
+
+  // Ctrl-C quits unless turned off.
+  var cc: uint8[1] = [3];
+  tui_input_feed(t->input, &cc[0], 1);
+  t_ok("ctrl-c quits", tui_poll(t, 0, &ev) && ev.kind == TUI_EV_QUIT);
+  tui_set_ctrl_c_quits(t, false);
+  tui_input_feed(t->input, &cc[0], 1);
+  t_ok("ctrl-c as key", tui_poll(t, 0, &ev) && ev.kind == TUI_EV_KEY && ev.ch == 99 && ev.mods == TUI_MOD_CTRL);
+
+  // The cursor is placed after the frame.
+  var b: TuiBuf* = tui_frame(t);
+  tui_put(b, 0, 0, "> ", tui_style_default());
+  tui_cursor(t, true, 2, 0);
+  tui_show(t);
+  t_str("cursor shown", t_show(tui_output(t)), "`[?2026h`[m`[2J`[1;1H>`[C`[?25h`[?2026l");
+
+  tui_end(t);
+  tui_end((Tui*)0);
+  return t_done("app");
+}

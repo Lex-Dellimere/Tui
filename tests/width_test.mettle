@@ -1,0 +1,52 @@
+// Character widths and UTF-8 decoding.
+import "std/io";
+import "tui/tui";
+import "tutil";
+
+fn main() -> int32 {
+  t_eq("ascii", tui_cp_width(65), 1);
+  t_eq("control", tui_cp_width(7), -1);
+  t_eq("del", tui_cp_width(127), -1);
+  t_eq("e acute", tui_cp_width(0xE9), 1);
+  t_eq("combining acute", tui_cp_width(0x301), 0);
+  t_eq("zwj", tui_cp_width(0x200D), 0);
+  t_eq("soft hyphen", tui_cp_width(0xAD), 1);
+  t_eq("cjk", tui_cp_width(0x4E16), 2);
+  t_eq("hangul", tui_cp_width(0xAC00), 2);
+  t_eq("hangul medial jamo", tui_cp_width(0x1161), 0);
+  t_eq("fullwidth A", tui_cp_width(0xFF21), 2);
+  t_eq("emoji grin", tui_cp_width(0x1F600), 2);
+  t_eq("skin tone", tui_cp_width(0x1F3FD), 0);
+  t_eq("box drawing", tui_cp_width(0x2500), 1);
+  t_eq("braille", tui_cp_width(0x2800), 1);
+  t_eq("plane 2", tui_cp_width(0x20000), 2);
+  t_eq("plane 3 unassigned", tui_cp_width(0x3FFF0), 2);
+  t_eq("variation selector 16", tui_cp_width(0xFE0F), 0);
+
+  t_eq("str ascii", tui_str_width("hello"), 5);
+  t_eq("str mixed", tui_str_width("héllo 世界"), 10);
+  t_eq("str combining", tui_str_width("é"), 1);
+  t_eq("str flag", tui_str_width("🇩🇪"), 2);
+  t_eq("str two flags", tui_str_width("🇩🇪🇫🇷"), 4);
+  t_eq("str zwj family", tui_str_width("👨‍👩‍👧"), 2);
+  t_eq("str skin tone", tui_str_width("👍🏽"), 2);
+
+  // Decoding: good, then the "maximal subpart" replacements.
+  var cp: int32 = 0;
+  var s: string = "€";
+  t_eq("euro len", tui_utf8_next(s.chars, 3, 0, &cp), 3);
+  t_eq("euro cp", cp, 0x20AC);
+  var bad: uint8[6] = [0xE2, 0x82, 0x41, 0xC0, 0xAF, 0xED];
+  t_eq("cut lead", tui_utf8_next(&bad[0], 6, 0, &cp), 1);
+  t_eq("cut lead cp", cp, 0xFFFD);
+  t_eq("overlong", tui_utf8_next(&bad[0], 6, 3, &cp), 1);
+  t_eq("short at end", tui_utf8_next(&bad[0], 6, 5, &cp), 1);
+  var sur: uint8[3] = [0xED, 0xA0, 0x80];
+  tui_utf8_next(&sur[0], 3, 0, &cp);
+  t_eq("surrogate", cp, 0xFFFD);
+  var enc: uint8[4];
+  t_eq("encode 4", tui_utf8_put(&enc[0], 0x1F600), 4);
+  t_eq("encode back", tui_utf8_next(&enc[0], 4, 0, &cp), 4);
+  t_eq("encode back cp", cp, 0x1F600);
+  return t_done("width");
+}

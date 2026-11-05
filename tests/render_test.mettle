@@ -1,0 +1,106 @@
+// The cell buffer and the diff renderer, checked byte for byte.
+import "std/io";
+import "tui/tui";
+import "tutil";
+
+fn screen(t: Tui*) -> string { return tui_screen(t); }
+
+fn test_buf() {
+  var b: TuiBuf* = tui_buf_new(6, 2);
+  var st: TuiStyle;
+  t_eq("put cols", tui_put(b, 0, 0, "ab世", st), 4);
+  t_str("put text", tui_buf_row(b, 0), "ab世  ");
+  // Writing over the right half of a wide character blanks its left half.
+  tui_put(b, 3, 0, "x", st);
+  t_str("split wide", tui_buf_row(b, 0), "ab x  ");
+  // A wide character in the last column does not fit: a space instead.
+  tui_put(b, 5, 1, "界", st);
+  t_str("wide at edge", tui_buf_row(b, 1), "      ");
+  // Clipping by width.
+  t_eq("clip", tui_put_clip(b, 0, 1, "abcdef", 3, st), 3);
+  t_str("clip text", tui_buf_row(b, 1), "abc   ");
+  // Combining marks join the cell before.
+  tui_buf_clear(b);
+  tui_put(b, 0, 0, "éa", st);
+  t_eq("combining joins", (int64)tui_buf_cell(b, 0, 0)->len, 3);
+  t_str("combining row", tui_buf_row(b, 0), "éa    ");
+  // Flags and ZWJ emoji are one wide cell.
+  tui_buf_clear(b);
+  t_eq("flag cols", tui_put(b, 0, 0, "🇩🇪x", st), 3);
+  t_eq("flag width", (int64)tui_buf_cell(b, 0, 0)->width, 2);
+  t_str("flag row", tui_buf_row(b, 0), "🇩🇪x   ");
+  tui_buf_clear(b);
+  t_eq("zwj cols", tui_put(b, 0, 0, "👨‍👩‍👧!", st), 3);
+  // Off-buffer writes are ignored.
+  tui_put(b, -3, 0, "abcdef", st);
+  tui_put(b, 0, 9, "abc", st);
+  t_str("negative x", tui_buf_row(b, 0), "def   ");
+  tui_buf_free(b);
+}
+
+fn test_render() {
+  var t: Tui* = tui_headless(5, 2);
+  var b: TuiBuf* = tui_frame(t);
+  tui_put(b, 0, 0, "hi", tui_style_default());
+  tui_show(t);
+  t_str("first frame", t_show(tui_output(t)), "`[?2026h`[m`[2J`[1;1Hhi`[?25l`[?2026l");
+  t_str("screen", screen(t), "hi   \n     \n");
+
+  // Nothing changed: no cells written.
+  b = tui_frame(t);
+  tui_put(b, 0, 0, "hi", tui_style_default());
+  tui_show(t);
+  t_eq("same frame cells", t->last_cells, 0);
+  t_str("same frame bytes", t_show(tui_output(t)), "`[?2026h`[?25l`[?2026l");
+
+  // One cell changes colour; the next cell along uses CUF, not CUP.
+  b = tui_frame(t);
+  tui_put(b, 0, 0, "h", tui_style_default());
+  tui_put(b, 1, 0, "I", tui_style(tui_rgb(255, 0, 0), TUI_DEFAULT, TUI_BOLD));
+  tui_put(b, 3, 1, "z", tui_style_default());
+  tui_show(t);
+  t_eq("diff cells", t->last_cells, 2);
+  t_str("diff bytes", t_show(tui_output(t)), "`[?2026h`[1;2H`[1;38;2;255;0;0mI`[2;4H`[0mz`[?25l`[?2026l");
+
+  // 256 and 16 colour fallbacks.
+  tui_set_depth(t, TUI_DEPTH_256);
+  b = tui_frame(t);
+  tui_put(b, 0, 0, "x", tui_style(tui_rgb(255, 0, 0), tui_rgb(0, 0, 0), (uint16)0));
+  tui_show(t);
+  t_str("256 colour", t_show(tui_output(t)), "`[?2026h`[m`[2J`[1;1H`[38;5;196;48;5;16mx`[?25l`[?2026l");
+  tui_set_depth(t, TUI_DEPTH_16);
+  tui_show(t);
+  t_str("16 colour", t_show(tui_output(t)), "`[?2026h`[m`[2J`[1;1H`[91;40mx`[?25l`[?2026l");
+
+  // Resize: buffers change size and the next frame redraws.
+  tui_resize(t, 3, 1);
+  var ev: TuiEvent;
+  t_ok("resize event", tui_poll(t, 0, &ev) && ev.kind == TUI_EV_RESIZE && ev.w == 3 && ev.h == 1);
+  b = tui_frame(t);
+  tui_put(b, 0, 0, "abcdef", tui_style_default());
+  tui_show(t);
+  t_str("after resize", screen(t), "abc\n");
+  tui_end(t);
+}
+
+fn test_color() {
+  t_eq("cube exact", (int64)tui_rgb_to_256(tui_rgb(95, 135, 175)), 67);
+  t_eq("grey", (int64)tui_rgb_to_256(tui_rgb(128, 128, 128)), 244);
+  t_eq("white", (int64)tui_rgb_to_256(tui_rgb(255, 255, 255)), 231);
+  t_eq("16 red", (int64)tui_rgb_to_16(tui_rgb(250, 10, 10)), 9);
+  t_eq("16 dark blue", (int64)tui_rgb_to_16(tui_rgb(0, 0, 200)), 4);
+  t_ok("index kept at 256", tui_color_for(tui_index(100), TUI_DEPTH_256) == tui_index(100));
+  t_ok("index down to 16", tui_color_for(tui_index(196), TUI_DEPTH_16) == tui_index(9));
+  t_ok("mix half", tui_mix(tui_rgb(0, 0, 0), tui_rgb(200, 100, 50), 500) == tui_rgb(100, 50, 25));
+  var stops: uint32[3] = [tui_rgb(0, 255, 0), tui_rgb(255, 255, 0), tui_rgb(255, 0, 0)];
+  t_ok("gradient start", tui_gradient(stops, 0) == tui_rgb(0, 255, 0));
+  t_ok("gradient mid", tui_gradient(stops, 500) == tui_rgb(255, 255, 0));
+  t_ok("gradient end", tui_gradient(stops, 1000) == tui_rgb(255, 0, 0));
+}
+
+fn main() -> int32 {
+  test_buf();
+  test_render();
+  test_color();
+  return t_done("render");
+}

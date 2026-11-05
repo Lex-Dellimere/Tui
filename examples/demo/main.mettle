@@ -1,0 +1,119 @@
+// A live dashboard: graphs, meters, a sparkline and a process table that
+// update four times a second. Keys: up/down or the mouse wheel to move,
+// a click to select, b to switch graph style, q or Ctrl-C to quit.
+import "std/io";
+import "std/math";
+import "tui/tui";
+
+const HIST = 400;
+
+var g_cpu: float64[400];
+var g_mem: float64[400];
+var g_net: float64[400];
+var g_tick: int32 = 0;
+
+fn push(h: float64*, v: float64) {
+  for i in 0..HIST - 1 { h[i] = h[i + 1]; }
+  h[HIST - 1] = v;
+}
+
+fn sample() {
+  var t: float64 = (float64)g_tick * 0.15;
+  push(&g_cpu[0], 50.0 + 35.0 * sin(t) + 10.0 * sin(t * 3.7));
+  push(&g_mem[0], 40.0 + 20.0 * sin(t * 0.3));
+  push(&g_net[0], 30.0 + 25.0 * sin(t * 1.9) * cos(t * 0.7));
+  g_tick = g_tick + 1;
+}
+
+fn view(h: float64*) -> float64[] {
+  var s: float64[] = { data: h, length: HIST };
+  return s;
+}
+
+fn draw(t: Tui*, sel: TuiScroll*, block_mode: bool) {
+  var b: TuiBuf* = tui_frame(t);
+  var frame: TuiStyle = tui_style_fg(tui_hex(0x5F87AF));
+  var title: TuiStyle = tui_style(tui_hex(0xEEEEEE), TUI_DEFAULT, TUI_BOLD);
+  var rows: TuiRect[2];
+  var rl: TuiLen[2] = [tui_percent(55), tui_fill_len(1)];
+  tui_split(tui_size(t), TUI_ROWS, rl, 0, &rows[0]);
+
+  // CPU graph with a green-yellow-red gradient.
+  var cpu_in: TuiRect = tui_block(b, rows[0], TUI_BORDER_ROUNDED, frame, "cpu", title);
+  var stops: uint32[3] = [tui_hex(0x50F095), tui_hex(0xF0D050), tui_hex(0xF05050)];
+  var cs: TuiSeries = tui_series(view(&g_cpu[0]), TUI_GREEN);
+  cs.stops = stops;
+  var series: TuiSeries[1] = [cs];
+  var mode: int32 = TUI_GRAPH_BRAILLE | TUI_GRAPH_FILL;
+  if (block_mode) { mode = TUI_GRAPH_BLOCK; }
+  tui_graph(b, cpu_in, series, 0.0, 100.0, mode);
+  tui_border_label(b, rows[0], "b: graph style", TUI_RIGHT, true, frame);
+
+  var cols: TuiRect[2];
+  var cl: TuiLen[2] = [tui_fixed(36), tui_fill_len(1)];
+  tui_split(rows[1], TUI_COLS, cl, 0, &cols[0]);
+
+  // Meters and a sparkline.
+  var left: TuiRect = tui_block(b, cols[0], TUI_BORDER_ROUNDED, frame, "mem / net", title);
+  var lab: TuiStyle = tui_style_fg(tui_hex(0xAAAAAA));
+  if (left.h >= 1) {
+    tui_put(b, left.x, left.y, "mem", lab);
+    tui_meter(b, tui_rect(left.x + 4, left.y, left.w - 4, 1), g_mem[HIST - 1] / 100.0, stops, tui_hex(0x303030), 0);
+  }
+  if (left.h >= 2) {
+    tui_put(b, left.x, left.y + 1, "net", lab);
+    tui_gauge(b, tui_rect(left.x + 4, left.y + 1, left.w - 4, 1), g_net[HIST - 1] / 100.0, "", tui_hex(0x5FAFFF), tui_hex(0x262626), TUI_WHITE);
+  }
+  if (left.h >= 3) {
+    tui_sparkline(b, tui_rect(left.x, left.y + 2, left.w, left.h - 2), view(&g_net[0]), 100.0, tui_hex(0x5FAFFF), tui_no_stops());
+  }
+
+  // A table that follows the selection.
+  var right: TuiRect = tui_block(b, cols[1], TUI_BORDER_ROUNDED, frame, "processes", title);
+  var heads: string[3] = ["pid", "name", "cpu%"];
+  var cells: string[30] = [
+    "1", "init", "0.0", "212", "sshd", "0.1", "388", "mettle", "41.3", "391", "mbuild", "7.9",
+    "402", "sysmon", "2.2", "512", "bash", "0.0", "640", "vim", "0.4", "777", "meodb", "12.5",
+    "801", "alph", "3.1", "999", "tui-demo", "1.0"];
+  var widths: TuiLen[3] = [tui_fixed(5), tui_fill_len(1), tui_fixed(6)];
+  var aligns: int32[3] = [TUI_RIGHT, TUI_LEFT, TUI_RIGHT];
+  var sel_st: TuiStyle = tui_style(TUI_DEFAULT, tui_hex(0x303A50), TUI_BOLD);
+  tui_table(b, right, heads, cells, widths, aligns, sel, title, tui_style_default(), sel_st);
+  tui_show(t);
+}
+
+fn main() -> int32 {
+  var t: Tui* = tui_init();
+  if (t == 0) {
+    println("tui-demo needs a terminal");
+    return 1;
+  }
+  for i in 0..HIST { sample(); }
+  var sel: TuiScroll = { selected: 0, offset: 0 };
+  var block_mode: bool = false;
+  tui_timer_every(t, 250);
+  draw(t, &sel, block_mode);
+  var ev: TuiEvent;
+  var running: bool = true;
+  while (running) {
+    if (!tui_poll(t, -1, &ev)) { continue; }
+    switch (ev.kind) {
+      case TUI_EV_QUIT: { running = false; }
+      case TUI_EV_TIMER: { sample(); }
+      case TUI_EV_KEY: {
+        if (ev.key == TUI_KEY_CHAR && ev.ch == 113) { running = false; }
+        if (ev.key == TUI_KEY_CHAR && ev.ch == 98) { block_mode = !block_mode; }
+        if (ev.key == TUI_KEY_UP) { tui_scroll_move(&sel, -1, 10); }
+        if (ev.key == TUI_KEY_DOWN) { tui_scroll_move(&sel, 1, 10); }
+      }
+      case TUI_EV_MOUSE: {
+        if (ev.button == TUI_BTN_WHEEL_UP) { tui_scroll_move(&sel, -1, 10); }
+        if (ev.button == TUI_BTN_WHEEL_DOWN) { tui_scroll_move(&sel, 1, 10); }
+      }
+      default: { }
+    }
+    if (running) { draw(t, &sel, block_mode); }
+  }
+  tui_end(t);
+  return 0;
+}

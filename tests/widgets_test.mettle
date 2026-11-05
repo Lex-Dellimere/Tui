@@ -1,0 +1,163 @@
+// Layout and widgets, checked as exact screens.
+import "std/io";
+import "tui/tui";
+import "tutil";
+
+var g_st: TuiStyle;
+
+fn fresh(w: int32, h: int32) -> TuiBuf* { return tui_buf_new(w, h); }
+
+fn test_layout() {
+  var parts: TuiRect[3];
+  var lens: TuiLen[3] = [tui_fixed(3), tui_percent(50), tui_fill_len(1)];
+  tui_split(tui_rect(0, 0, 20, 10), TUI_COLS, lens, 1, &parts[0]);
+  t_eq("fixed w", (int64)parts[0].w, 3);
+  t_eq("percent x", (int64)parts[1].x, 4);
+  t_eq("percent w", (int64)parts[1].w, 9);
+  t_eq("fill x", (int64)parts[2].x, 14);
+  t_eq("fill w", (int64)parts[2].w, 6);
+  var two: TuiLen[2] = [tui_fill_len(1), tui_fill_len(2)];
+  tui_split(tui_rect(0, 0, 10, 10), TUI_ROWS, two, 0, &parts[0]);
+  t_eq("weighted 1", (int64)parts[0].h, 3);
+  t_eq("weighted 2", (int64)parts[1].h, 7);
+  t_eq("weighted y", (int64)parts[1].y, 3);
+  // Too little room: fixed parts are cut, nothing goes negative.
+  var big: TuiLen[2] = [tui_fixed(8), tui_fixed(8)];
+  tui_split(tui_rect(0, 0, 10, 1), TUI_COLS, big, 0, &parts[0]);
+  t_eq("cut first", (int64)parts[0].w, 8);
+  t_eq("cut second", (int64)parts[1].w, 2);
+  var c: TuiRect = tui_center(tui_rect(0, 0, 10, 10), 4, 2);
+  t_ok("center", c.x == 3 && c.y == 4 && c.w == 4 && c.h == 2);
+}
+
+fn test_block() {
+  var b: TuiBuf* = fresh(12, 4);
+  defer tui_buf_free(b);
+  var inner: TuiRect = tui_block(b, tui_buf_area(b), TUI_BORDER_ROUNDED, g_st, "cpu", g_st);
+  tui_put(b, inner.x, inner.y, "inside", g_st);
+  tui_border_label(b, tui_buf_area(b), "42%", TUI_RIGHT, true, g_st);
+  t_str("rounded block", tui_buf_text(b),
+    "╭cpu───────╮\n" +
+    "│inside    │\n" +
+    "│          │\n" +
+    "╰───────42%╯\n");
+  t_ok("inner", inner.x == 1 && inner.y == 1 && inner.w == 10 && inner.h == 2);
+  tui_buf_clear(b);
+  tui_block(b, tui_buf_area(b), TUI_BORDER_PLAIN, g_st, "a very long title", g_st);
+  t_str("plain clipped title", tui_buf_row(b, 0), "┌a very lon┐");
+  tui_buf_clear(b);
+  tui_border(b, tui_rect(0, 0, 3, 2), TUI_BORDER_DOUBLE, g_st);
+  t_str("double", tui_buf_row(b, 1), "╚═╝         ");
+}
+
+fn test_text() {
+  var b: TuiBuf* = fresh(8, 4);
+  defer tui_buf_free(b);
+  var used: int32 = tui_text(b, tui_buf_area(b), "the quick brown fox\nok", g_st, TUI_LEFT, true);
+  t_eq("lines", (int64)used, 5);
+  t_str("wrap", tui_buf_text(b), "the     \nquick   \nbrown   \nfox     \n");
+  tui_buf_clear(b);
+  tui_text(b, tui_rect(0, 0, 8, 2), "ab\ncd", g_st, TUI_RIGHT, false);
+  t_str("right", tui_buf_row(b, 1), "      cd");
+  tui_buf_clear(b);
+  tui_text(b, tui_rect(0, 0, 8, 1), "mid", g_st, TUI_CENTER, false);
+  t_str("center", tui_buf_row(b, 0), "  mid   ");
+  tui_buf_clear(b);
+  tui_text(b, tui_rect(0, 0, 4, 3), "abcdefghij", g_st, TUI_LEFT, true);
+  t_str("long word", tui_buf_text(b), "abcd    \nefgh    \nij      \n        \n");
+  tui_buf_clear(b);
+  var spans: TuiSpan[2] = [tui_span("ab", g_st), tui_span("cdef", tui_style_fg(TUI_RED))];
+  t_eq("spans cols", (int64)tui_spans(b, 0, 0, 5, spans), 5);
+  t_ok("span style", tui_buf_cell(b, 3, 0)->style.fg == TUI_RED);
+}
+
+fn test_list() {
+  var b: TuiBuf* = fresh(6, 3);
+  defer tui_buf_free(b);
+  var items: string[5] = ["one", "two", "three", "four", "five"];
+  var s: TuiScroll = { selected: 4, offset: 0 };
+  var sel: TuiStyle = tui_style(TUI_DEFAULT, TUI_BLUE, (uint16)0);
+  tui_list(b, tui_buf_area(b), items, &s, g_st, sel);
+  t_eq("offset follows", (int64)s.offset, 2);
+  t_str("list", tui_buf_text(b), "three \nfour  \nfive  \n");
+  t_ok("selected row styled", tui_buf_cell(b, 5, 2)->style.bg == TUI_BLUE);
+  tui_scroll_move(&s, -10, 5);
+  t_eq("move clamps", (int64)s.selected, 0);
+  tui_buf_clear(b);
+  tui_list(b, tui_buf_area(b), items, &s, g_st, sel);
+  t_str("list top", tui_buf_row(b, 0), "one   ");
+}
+
+fn test_table() {
+  var b: TuiBuf* = fresh(14, 3);
+  defer tui_buf_free(b);
+  var heads: string[2] = ["name", "cpu"];
+  var cells: string[6] = ["init", "0.1", "mettle", "93.5", "x", "1"];
+  var widths: TuiLen[2] = [tui_fill_len(1), tui_fixed(5)];
+  var aligns: int32[2] = [TUI_LEFT, TUI_RIGHT];
+  var s: TuiScroll = { selected: 1, offset: 0 };
+  tui_table(b, tui_buf_area(b), heads, cells, widths, aligns, &s, g_st, g_st, g_st);
+  t_str("table", tui_buf_text(b), "name       cpu\ninit       0.1\nmettle    93.5\n");
+}
+
+fn test_charts() {
+  var b: TuiBuf* = fresh(4, 1);
+  defer tui_buf_free(b);
+  tui_gauge(b, tui_buf_area(b), 0.5, "", TUI_GREEN, TUI_BLACK, TUI_WHITE);
+  t_ok("gauge half", tui_buf_cell(b, 1, 0)->style.bg == TUI_GREEN && tui_buf_cell(b, 2, 0)->style.bg == TUI_BLACK);
+  tui_gauge(b, tui_buf_area(b), 0.3, "", TUI_GREEN, TUI_BLACK, TUI_WHITE);
+  // 0.3 * 4 cells * 8 = 9.6 -> 10 eighths: one full cell and 2/8.
+  t_str("gauge partial", tui_buf_row(b, 0), " ▎  ");
+  tui_gauge(b, tui_buf_area(b), 1.0, "ok", TUI_GREEN, TUI_BLACK, TUI_WHITE);
+  t_ok("gauge label", tui_buf_cell(b, 1, 0)->text[0] == (uint8)111 && tui_buf_cell(b, 1, 0)->style.bg == TUI_GREEN);
+  tui_gauge(b, tui_buf_area(b), 0.0 / 0.0, "", TUI_GREEN, TUI_BLACK, TUI_WHITE);
+  t_ok("gauge nan", tui_buf_cell(b, 0, 0)->style.bg == TUI_BLACK);
+
+  var m: TuiBuf* = fresh(5, 1);
+  defer tui_buf_free(m);
+  var stops: uint32[2] = [tui_rgb(0, 255, 0), tui_rgb(255, 0, 0)];
+  tui_meter(m, tui_buf_area(m), 0.6, stops, TUI_BRIGHT_BLACK, 0);
+  t_str("meter", tui_buf_row(m, 0), "■■■■■");
+  t_ok("meter first", tui_buf_cell(m, 0, 0)->style.fg == tui_rgb(0, 255, 0));
+  t_ok("meter empty", tui_buf_cell(m, 4, 0)->style.fg == TUI_BRIGHT_BLACK);
+
+  var sp: TuiBuf* = fresh(5, 2);
+  defer tui_buf_free(sp);
+  var vals: float64[6] = [9.0, 0.0, 1.0, 2.0, 3.0, 4.0];
+  var none: uint32[] = tui_no_stops();
+  tui_sparkline(sp, tui_buf_area(sp), vals, 4.0, TUI_CYAN, none);
+  t_str("sparkline", tui_buf_text(sp), "   ▄█\n ▄███\n");
+
+  var cv: TuiCanvas* = tui_canvas_new(2, 1);
+  tui_canvas_line(cv, 0, 0, 3, 3, TUI_RED);
+  var cb: TuiBuf* = fresh(2, 1);
+  defer tui_buf_free(cb);
+  tui_canvas_draw(cb, cv, 0, 0, TUI_DEFAULT);
+  // Dots (0,0) (1,1) in cell 0 and (2,2) (3,3) in cell 1.
+  t_str("braille line", tui_buf_row(cb, 0), "⠑⢄");
+  tui_canvas_free(cv);
+
+  var g: TuiBuf* = fresh(2, 1);
+  defer tui_buf_free(g);
+  var gv: float64[4] = [0.0, 1.0, 2.0, 3.0];
+  var series: TuiSeries[1] = [tui_series(gv, TUI_GREEN)];
+  tui_graph(g, tui_buf_area(g), series, 0.0, 3.0, TUI_GRAPH_BRAILLE);
+  t_str("graph braille", tui_buf_row(g, 0), "⡠⠊");
+  tui_buf_clear(g);
+  tui_graph(g, tui_buf_area(g), series, 0.0, 3.0, TUI_GRAPH_BRAILLE | TUI_GRAPH_FILL);
+  t_str("graph fill", tui_buf_row(g, 0), "⣠⣾");
+  var gb: TuiBuf* = fresh(4, 1);
+  defer tui_buf_free(gb);
+  tui_graph(gb, tui_buf_area(gb), series, 0.0, 3.0, TUI_GRAPH_BLOCK);
+  t_str("graph block", tui_buf_row(gb, 0), " ▃▅█");
+}
+
+fn main() -> int32 {
+  test_layout();
+  test_block();
+  test_text();
+  test_list();
+  test_table();
+  test_charts();
+  return t_done("widgets");
+}

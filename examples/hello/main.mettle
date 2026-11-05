@@ -1,0 +1,24 @@
+// The README example: a box that counts timer ticks.
+import "tui/tui";
+
+fn main() -> int32 {
+  var t: Tui* = tui_init();
+  if (t == 0) { return 1; }            // not a terminal
+  tui_timer_every(t, 500);
+  var ev: TuiEvent;
+  var n: int32 = 0;
+  var running: bool = true;
+  while (running) {
+    var b: TuiBuf* = tui_frame(t);
+    var inner: TuiRect = tui_block(b, tui_size(t), TUI_BORDER_ROUNDED,
+        tui_style_fg(TUI_CYAN), "hello", tui_style_default());
+    tui_put(b, inner.x, inner.y, "ticks: {n}  (q quits)", tui_style_default());
+    tui_show(t);
+    if (!tui_poll(t, -1, &ev)) { continue; }
+    if (ev.kind == TUI_EV_QUIT) { running = false; }
+    if (ev.kind == TUI_EV_KEY && ev.ch == 113) { running = false; }
+    if (ev.kind == TUI_EV_TIMER) { n = n + 1; }
+  }
+  tui_end(t);
+  return 0;
+}

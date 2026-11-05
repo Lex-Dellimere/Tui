@@ -1,0 +1,31 @@
+// Times full frames at 200x60: drawing a dashboard-like screen, diffing and
+// encoding it (headless, so the terminal's own speed is left out).
+import "std/io";
+import "std/math";
+import "std/time";
+import "tui/tui";
+
+fn main() -> int32 {
+  var t: Tui* = tui_headless(200, 60);
+  var vals: float64[400];
+  for i in 0..400 { vals[i] = 50.0 + 40.0 * sin((float64)i * 0.1); }
+  var series: TuiSeries[1] = [tui_series(vals, TUI_GREEN)];
+  var stops: uint32[2] = [tui_hex(0x50F095), tui_hex(0xF05050)];
+  series[0].stops = stops;
+  const FRAMES: int32 = 2000;
+  var bytes: int64 = 0;
+  var t0: int64 = time_mono_us();
+  for f in 0..FRAMES {
+    vals[f % 400] = 50.0 + 40.0 * cos((float64)f * 0.37);
+    var b: TuiBuf* = tui_frame(t);
+    var inner: TuiRect = tui_block(b, tui_rect(0, 0, 200, 40), TUI_BORDER_ROUNDED, tui_style_default(), "cpu", tui_style_default());
+    tui_graph(b, inner, series, 0.0, 100.0, TUI_GRAPH_BRAILLE | TUI_GRAPH_FILL);
+    for r in 0..18 { tui_put(b, 1, 41 + r, "process line with some text and numbers 12345 67.8%", tui_style_default()); }
+    tui_show(t);
+    bytes = bytes + t->last_bytes;
+  }
+  var us: int64 = time_mono_us() - t0;
+  println("{FRAMES} frames of 200x60 in {us / 1000} ms: {us / (int64)FRAMES} us a frame, {bytes / (int64)FRAMES} bytes a frame");
+  tui_end(t);
+  return 0;
+}

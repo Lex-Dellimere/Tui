@@ -1,0 +1,26 @@
+// mbuild.mettle: the project file for tui. `mbuild help` lists its commands.
+//
+// Layout: src/tui.mettle is the facade; the modules sit next to it in src/.
+// Tests: tests/<name>_test.mettle, run with `mbuild test` and `mbuild test -r`.
+import "mbuild/api";
+
+fn project() {
+  mb_package("tui", "0.1.0");
+  mb_meta("description", "terminal user interfaces in pure Mettle: raw mode, diff rendering, input, layout, widgets, charts");
+  mb_meta("license", "Apache-2.0");
+  mb_meta("repository", "https://github.com/Lex-Dellimere/Tui");
+  mb_import_root("src");
+  mb_bin("demo", "examples/demo/main.mettle");
+  mb_bin("keys", "examples/keys/main.mettle");
+  mb_bin("hello", "examples/hello/main.mettle");
+  mb_bin("bench", "bench/main.mettle");
+}
+
+fn deps() {
+}
+
+// bench: time frames in release (`mbuild bench`).
+fn cmd_bench(a: MbArgs*) -> int32 {
+  if (mb_mbuild("build -r") != 0) { return 1; }
+  return mb_cmd_run(mb_cmd(mb_out("bench", mb_os(), "release")));
+}
